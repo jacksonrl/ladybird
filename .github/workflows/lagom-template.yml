@@ -44,10 +44,10 @@ jobs:
       # Pull requests can trail behind `master` and can cause breakage if merging before running the CI checks on an updated branch.
       # Luckily, GitHub creates and maintains a merge branch that is updated whenever the target or source branch is modified. By
       # checking this branch out, we gain a stabler `master` at the cost of reproducibility.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
         if: ${{ github.event_name != 'pull_request' }}
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
         if: ${{ github.event_name == 'pull_request' }}
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
@@ -173,6 +173,13 @@ jobs:
           cmake --build .
           cmake --install . --strip --prefix ${{ github.workspace }}/Install
 
+      - name: Upload Windows Artifacts
+        if: ${{ success() && inputs.os_name == 'Windows' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ladybird-Windows-${{ inputs.build_preset }}
+          path: ${{ github.workspace }}/Install
+
       - name: Build - macOS with Qt
         if: ${{ inputs.os_name == 'macOS' && inputs.build_preset == 'Sanitizer' }}
         working-directory: ${{ github.workspace }}
@@ -211,7 +218,7 @@ jobs:
 
       - name: Upload LibWeb Test Artifacts
         if: ${{ always() && inputs.build_preset != 'Fuzzers' && inputs.build_preset != 'All_Debug' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: libweb-test-artifacts-${{ inputs.os_name }}-${{ inputs.build_preset }}-${{ inputs.toolchain }}-${{ inputs.clang-plugins }}
           path: ${{ github.workspace }}/Build/Lagom/Tests/LibWeb/test-web/test-dumps/
