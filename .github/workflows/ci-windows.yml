@@ -17,5 +17,5 @@ jobs:
       os_name: 'Windows'
       runner_labels: '["windows-2025"]'
       arch: 'x86_64'
-      build_preset: 'Windows_Sanitizer_CI'
+      build_preset: 'Windows_CI'
       clang_plugins: false
