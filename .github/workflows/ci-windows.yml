@@ -1,27 +1,15 @@
-name: CI (Windows)
+name: Build Windows EXE
 
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
-      - unlabeled
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # Do not cancel in-progress runs if a labeling action took place (other than 'windows'). Otherwise, adding irrelevant
-  # labels causes existing runs to be canceled and a new (identical) run to be started.
-  cancel-in-progress: ${{ (github.event.action != 'labeled' && github.event.action != 'unlabeled') || github.event.label.name == 'windows' }}
+  # Run whenever you push to main or master in your fork
+  push:
+    branches: [ main, master ]
+  # Allow running manually from the Actions tab
+  workflow_dispatch:
 
 jobs:
   CI:
-    # Only run this job if the PR has the 'windows' label.
-    if: |
-      github.repository == 'LadybirdBrowser/ladybird'
-      && contains(github.event.pull_request.labels.*.name, 'windows')
-    name: 'Windows, x86_64, Windows_Sanitizer_CI, ClangCL'
+    name: 'Windows Build'
     secrets: inherit
     uses: ./.github/workflows/lagom-template.yml
     with:
