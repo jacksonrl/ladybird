@@ -173,6 +173,13 @@ jobs:
           cmake --build .
           cmake --install . --strip --prefix ${{ github.workspace }}/Install
 
+      # === NEW STEP: Bundle DLLs ===
+      - name: Bundle Windows DLLs
+        if: ${{ inputs.os_name == 'Windows' }}
+        run: |
+          # Copy dependent DLLs (pthread, fontconfig, etc.) next to the executable
+          Copy-Item "${{ github.workspace }}/Build/vcpkg_installed/x64-windows/bin/*.dll" -Destination "${{ github.workspace }}/Install/bin" -Force
+
       - name: Upload Windows Artifacts
         if: ${{ success() && inputs.os_name == 'Windows' }}
         uses: actions/upload-artifact@v4
