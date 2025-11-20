@@ -1,21 +1,142 @@
 name: Build Windows EXE
 
 on:
-  # Run whenever you push to main or master in your fork
   push:
     branches: [ main, master ]
-  # Allow running manually from the Actions tab
   workflow_dispatch:
 
+env:
+  LADYBIRD_SOURCE_DIR: ${{ github.workspace }}
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  VCPKG_ROOT: ${{ github.workspace }}/Build/vcpkg
+  CCACHE_COMPILERCHECK: "%compiler% -v"
+
 jobs:
-  CI:
-    name: 'Windows Build'
-    secrets: inherit
-    uses: ./.github/workflows/lagom-template.yml
-    with:
-      toolchain: 'ClangCL'
-      os_name: 'Windows'
-      runner_labels: '["windows-2025"]'
-      arch: 'x86_64'
-      build_preset: 'Windows_CI'
-      clang_plugins: false
+  build-windows:
+    name: Windows Release Build
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+        if: ${{ github.event_name != 'pull_request' }}
+
+      - uses: actions/checkout@v4
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+
+      # 1. Setup Environment (Using repo's internal action)
+      - name: Set Up Environment
+        uses: ./.github/actions/setup
+        with:
+          os: 'Windows'
+          arch: 'x86_64'
+          toolchain: 'ClangCL'
+
+      # 2. Restore Cache (Using repo's internal action)
+      - name: Restore Caches
+        uses: ./.github/actions/cache-restore
+        id: 'cache-restore'
+        with:
+          runner_labels: '["windows-2025"]'
+          os: 'Windows'
+          arch: 'x86_64'
+          toolchain: 'ClangCL'
+          cache_key_extra: 'Windows_CI'
+          ccache_path: ${{ env.CCACHE_DIR }}
+          download_cache_path: ${{ github.workspace }}/Build/caches
+          vcpkg_cache_path: ${{ github.workspace }}/Build/caches/vcpkg-binary-cache
+
+      # 3. Configure CMake (TESTS DISABLED for speed)
+      - name: Configure CMake
+        working-directory: ${{ github.workspace }}
+        env:
+          VCPKG_CACHE_SAS: ${{ github.ref == 'refs/heads/master' && secrets.VCPKG_CACHE_SAS || '' }}
+          VCPKG_CACHE_MODE: ${{ github.ref == 'refs/heads/master' && 'write' || '' }}
+        run: |
+          cmake --preset Windows_CI -B Build `
+            -DENABLE_CI_BASELINE_CPU=ON `
+            -DENABLE_TESTS=OFF `
+            -DBUILD_TESTING=OFF `
+            -DENABLE_LAGOM_TESTS=OFF
+
+      # 4. Build and Install
+      - name: Build and Install
+        working-directory: ${{ github.workspace }}/Build
+        run: |
+          cmake --build .
+          cmake --install . --strip --prefix ${{ github.workspace }}/Install
+
+      # 5. Bundle DLLs (Robust Script)
+      - name: Bundle DLLs and Plugins
+        run: |
+          $installDir = "${{ github.workspace }}/Install"
+          $binDir = "$installDir/bin"
+          $buildDir = "${{ github.workspace }}/Build"
+
+          # Create bin if it doesn't exist (just in case)
+          if (!(Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir }
+
+          # A. Copy generic dependencies (pthread, fontconfig, ssl, etc)
+          Write-Host "Copying VCPKG DLLs..."
+          Copy-Item "$buildDir/vcpkg_installed/x64-windows/bin/*.dll" -Destination $binDir -Force -ErrorAction SilentlyContinue
+
+          # B. Find and copy Qt Platform Plugin (qwindows.dll)
+          Write-Host "Searching for qwindows.dll..."
+          $qwindowsFile = Get-ChildItem -Path "$buildDir/vcpkg_installed" -Recurse -Filter "qwindows.dll" | Select-Object -First 1
+          
+          if ($qwindowsFile) {
+             $destPlatforms = "$binDir/platforms"
+             New-Item -ItemType Directory -Force -Path $destPlatforms
+             Write-Host "Found qwindows at $($qwindowsFile.FullName), copying..."
+             Copy-Item $qwindowsFile.FullName -Destination $destPlatforms -Force
+          } else {
+             Write-Error "Critical Error: Could not find qwindows.dll in build directory!"
+          }
+
+          # C. Find and copy Qt Image Formats (jpeg, gif, ico)
+          Write-Host "Searching for Qt Image Formats..."
+          # We look for qjpeg.dll as a marker for the correct folder
+          $qjpegFile = Get-ChildItem -Path "$buildDir/vcpkg_installed" -Recurse -Filter "qjpeg.dll" | Select-Object -First 1
+          
+          if ($qjpegFile) {
+             $sourceImgDir = $qjpegFile.DirectoryName
+             $destImgFormats = "$binDir/imageformats"
+             New-Item -ItemType Directory -Force -Path $destImgFormats
+             Write-Host "Found imageformats at $sourceImgDir, copying..."
+             Copy-Item "$sourceImgDir/*.dll" -Destination $destImgFormats -Force
+          }
+
+          # D. Flatten libexec (Fixes immediate crash on tab open)
+          # Moves helper executables (WebContent.exe, etc) from libexec/ to bin/
+          if (Test-Path "$installDir/libexec") {
+              Write-Host "Moving helper executables from libexec to bin..."
+              Copy-Item "$installDir/libexec/*.exe" -Destination $binDir -Force
+              Remove-Item "$installDir/libexec" -Recurse -Force
+          }
+          
+          # E. Cleanup Development Files (Reduces download size)
+          Write-Host "Removing development headers and libs..."
+          Remove-Item -Path "$installDir/include" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$installDir/lib" -Recurse -Force -ErrorAction SilentlyContinue
+
+      # 6. Upload Result
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ladybird-Windows-Release
+          path: ${{ github.workspace }}/Install
+
+      # 7. Save Cache (Using repo's internal action)
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        with:
+          runner_labels: '["windows-2025"]'
+          arch: 'x86_64'
+          ccache_path: ${{ env.CCACHE_DIR }}
+          ccache_primary_key: ${{ steps.cache-restore.outputs.ccache_primary_key }}
+          vcpkg_cache_path: ${{ github.workspace }}/Build/caches/vcpkg-binary-cache
+          vcpkg_cache_primary_key: ${{ steps.cache-restore.outputs.vcpkg_cache_primary_key }}
