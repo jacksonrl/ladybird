@@ -52,13 +52,13 @@ jobs:
             -DBUILD_TESTING=OFF `
             -DENABLE_LAGOM_TESTS=OFF
 
-      - name: Build and Install
+      - name: Build
         working-directory: ${{ github.workspace }}/Build
         run: |
           cmake --build .
           cmake --install . --strip --prefix ${{ github.workspace }}/Install
 
-      - name: Bundle DLLs and Plugins
+      - name: Bundle DLLs
         run: |
           $installDir = "${{ github.workspace }}/Install"
           $binDir = "$installDir/bin"
